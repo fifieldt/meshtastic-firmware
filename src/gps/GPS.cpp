@@ -418,6 +418,7 @@ bool GPS::setup()
         } else {
             gnssModel = GNSS_MODEL_UNKNOWN;
         }
+
 #else
         gnssModel = GNSS_MODEL_UC6580;
 #endif
@@ -536,8 +537,8 @@ bool GPS::setup()
                             LOG_INFO(
                                 "GNSS configured for GPS+SBAS+GLONASS+Galileo. Pause for 0.75s before sending next command.\n");
                         }
-                        // Documentation say, we need wait atleast 0.5s after reconfiguration of GNSS module, before sending next
-                        // commands for the M8 it tends to be more... 1 sec should be enough ;>)
+                        // Documentation say, we need wait atleast 0.5s after reconfiguration of GNSS module, before sending
+                        // next commands for the M8 it tends to be more... 1 sec should be enough ;>)
                         delay(1000);
                     }
                 }
@@ -771,6 +772,22 @@ bool GPS::setup()
             } else {
                 LOG_INFO("GNSS module configuration saved!\n");
             }
+        } else if (gnssModel == GNSS_MODEL_AIROHA) {
+            clearBuffer();
+
+            // Set Normal Mode
+            _serial_gps->write("$PGKC105,0*37\r\n");
+            delay(250);
+            // Disable NMEA while we're configuring
+            _serial_gps->write("$PGKC242,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*37\r\n");
+            // Set NMEAInterval to 1000ms
+            _serial_gps->write("$PGKC101,1000\r\n");
+            // Initialize the AIROHA Chip, use GPS + GLONASS + BEIDOU + GALILEO
+            _serial_gps->write("$PGKC115,1,1,1,1,0*2B\r\n");
+            delay(250);
+            // Enable NMEA, only ask for RMC and GGA
+            _serial_gps->write("$PGKC242,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*37\r\n");
+            delay(250);
         }
         didSerialInit = true;
     }
@@ -1178,6 +1195,18 @@ GnssModel_t GPS::probe(int serialSpeed)
     uint8_t buffer[768] = {0};
     delay(100);
 
+    clearBuffer();
+    // Get version information for Air530
+    _serial_gps->write("$PGKC462*2F\r\n");
+    delay(250);
+    if (!_serial_gps->readStringUntil(',').startsWith("PGKC463")) {
+        LOG_INFO("AIROHA NO PGKC463");
+    } else {
+        LOG_INFO("AIROHA VERSION:");
+        LOG_INFO(_serial_gps->readString().c_str());
+        return GNSS_MODEL_AIROHA;
+    }
+
     // Close all NMEA sentences, valid for L76K, ATGM336H (and likely other AT6558 devices)
     _serial_gps->write("$PCAS03,0,0,0,0,0,0,0,0,0,0,,,0,0*02\r\n");
     delay(20);
@@ -1452,6 +1481,10 @@ bool GPS::factoryReset()
         LOG_INFO("Factory Reset via CAS-CFG-RST\n");
         uint8_t msglen = makeCASPacket(0x06, 0x02, sizeof(_message_CAS_CFG_RST_FACTORY), _message_CAS_CFG_RST_FACTORY);
         _serial_gps->write(UBXscratch, msglen);
+        delay(100);
+    } else if (gnssModel == GNSS_MODEL_AIROHA) {
+        LOG_INFO("GNSS Factory Reset via PGKC030,1,1*2C\n");
+        _serial_gps->write("$PGKC030,1,1*2C\r\n");
         delay(100);
     } else {
         // fire this for good measure, if we have an L76B - won't harm other devices.
