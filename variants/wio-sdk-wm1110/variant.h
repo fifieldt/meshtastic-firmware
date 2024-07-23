@@ -109,6 +109,9 @@ extern "C" {
 
 #define NRF_USE_SERIAL_DFU
 
+#define GPS_DEBUG
+#define HAS_GPS 1
+
 #ifdef __cplusplus
 }
 #endif
