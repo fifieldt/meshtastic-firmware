@@ -506,20 +506,33 @@ bool GPS::setup()
             _serial_gps->write("$CFGMSG,6,1,0\r\n");
             delay(250);
         } else if (gnssModel == GNSS_MODEL_AG3335) {
-
+            LOG_DEBUG("Setting up AG335...\n");
+            _serial_gps->write("$PAIR002*38\r\n"); // PAIR_GNSS_SUBSYS_POWER_ON	Power on the GNSS system. Include DSP/RF/Clock
+            delay(250);
             _serial_gps->write("$PAIR066,1,0,1,0,0,1*3B"); // Enable GPS+GALILEO+NAVIC
-
+            delay(250);
             // Configure NMEA (sentences will output once per fix)
-            _serial_gps->write("$PAIR062,0,0*3F"); // GGA ON
-            _serial_gps->write("$PAIR062,1,0*3F"); // GLL OFF
-            _serial_gps->write("$PAIR062,2,1*3D"); // GSA ON
-            _serial_gps->write("$PAIR062,3,0*3D"); // GSV OFF
-            _serial_gps->write("$PAIR062,4,0*3B"); // RMC ON
-            _serial_gps->write("$PAIR062,5,0*3B"); // VTG OFF
-            _serial_gps->write("$PAIR062,6,1*39"); // ZDA ON
+            _serial_gps->write("$PAIR062,0,1*3F");
+            delay(250); // GGA ON
+            _serial_gps->write("$PAIR062,1,0*3F");
+            delay(250); // GLL OFF
+            _serial_gps->write("$PAIR062,2,0*3C");
+            delay(250); // GSA OFF
+            _serial_gps->write("$PAIR062,3,0*3D");
+            delay(250); // GSV OFF
+            _serial_gps->write("$PAIR062,4,1*3B");
+            delay(250); // RMC ON
+            _serial_gps->write("$PAIR062,5,0*3B");
+            delay(250); // VTG OFF
+            _serial_gps->write("$PAIR062,6,0*38");
+            delay(250); // ZDA ON
+
+            _serial_gps->write("$PAIR080,1*2F");
+            delay(250); // Fitness mode!
 
             delay(250);
-            _serial_gps->write("$PAIR513*3D"); // save configuration
+            _serial_gps->write("$PAIR513*3D");
+            delay(250); // save configuration
 
         } else if (gnssModel == GNSS_MODEL_UBLOX) {
             // Configure GNSS system to GPS+SBAS+GLONASS (Module may restart after this command)
@@ -861,9 +874,9 @@ void GPS::setPowerState(GPSPowerState newState, uint32_t sleepTime)
         writePinStandby(true);                                      // Standby (pin): asleep
         setPowerUBLOX(false, 0);                                    // Standby (UBLOX): asleep, indefinitely
 #ifdef GNSS_AIROHA
-        if (config.position.gps_update_interval * 1000 >= GPS_FIX_HOLD_TIME * 2) {
-            digitalWrite(PIN_GPS_EN, LOW);
-        }
+        // if (config.position.gps_update_interval * 1000 >= GPS_FIX_HOLD_TIME * 2) {
+        //    digitalWrite(PIN_GPS_EN, LOW);
+        //}
 #endif
         break;
     }
@@ -1172,8 +1185,18 @@ int32_t GPS::runOnce()
 void GPS::clearBuffer()
 {
     int x = _serial_gps->available();
-    while (x--)
-        _serial_gps->read();
+    uint8_t buffer[768] = {0};
+    uint8_t b;
+    int bytesRead = 0;
+
+    while (x--) {
+        b = _serial_gps->read();
+        buffer[bytesRead] = b;
+    }
+
+#ifdef GPS_DEBUG
+    LOG_DEBUG("%02X", (char *)buffer);
+#endif
 }
 
 /// Prepare the GPS for the cpu entering deep or light sleep, expect to be gone for at least 100s of msecs
@@ -1195,24 +1218,40 @@ GnssModel_t GPS::probe(int serialSpeed)
         _serial_gps->updateBaudRate(serialSpeed);
     }
 #endif
-#ifdef GNSS_AIROHA
-    return GNSS_MODEL_AG3335;
-#endif
-#ifdef GPS_DEBUG
-    for (int i = 0; i < 20; i++) {
-        getACK("$GP", 200);
-    }
-#endif
+
     memset(&info, 0, sizeof(struct uBloxGnssModelInfo));
     uint8_t buffer[768] = {0};
     delay(100);
 
     // Close all NMEA sentences, valid for L76K, ATGM336H (and likely other AT6558 devices)
+    LOG_DEBUG("Trying to disable NMEA with PCAS03 ...\n");
     _serial_gps->write("$PCAS03,0,0,0,0,0,0,0,0,0,0,,,0,0*02\r\n");
     delay(20);
 
+    LOG_DEBUG("Trying PAIR003 (AG335) ...\n");
+    _serial_gps->write("$PAIR003*39\r\n");
+    delay(20);
+    _serial_gps->write("$PAIR066,0,0,0,0,0,0*3A"); // Disable all satellites
+    delay(20);
+    _serial_gps->write("$PAIR062,0,0*3E");
+    delay(250); // GGA OFF
+    _serial_gps->write("$PAIR062,1,0*3F");
+    delay(250); // GLL OFF
+    _serial_gps->write("$PAIR062,2,0*3C");
+    delay(250); // GSA OFF
+    _serial_gps->write("$PAIR062,3,0*3D");
+    delay(250); // GSV OFF
+    _serial_gps->write("$PAIR062,4,0*3A");
+    delay(250); // RMC OFF
+    _serial_gps->write("$PAIR062,5,0*3B");
+    delay(250); // VTG OFF
+    _serial_gps->write("$PAIR062,6,0*38");
+    delay(250); // ZDG OFF
+
     // get version information from Unicore UFirebirdII Series
     // Works for: UC6580, UM620, UM621, UM670A, UM680A, or UM681A
+    LOG_INFO("Trying PDTINFO (UC6580)...\n");
+    clearBuffer();
     _serial_gps->write("$PDTINFO\r\n");
     delay(750);
     if (getACK("UC6580", 500) == GNSS_RESPONSE_OK) {
@@ -1220,6 +1259,7 @@ GnssModel_t GPS::probe(int serialSpeed)
         return GNSS_MODEL_UC6580;
     }
 
+    LOG_INFO("Trying PDTINFO (UM600)...\n");
     clearBuffer();
     _serial_gps->write("$PDTINFO\r\n");
     delay(750);
@@ -1229,6 +1269,7 @@ GnssModel_t GPS::probe(int serialSpeed)
     }
 
     // Get version information for ATGM336H
+    LOG_INFO("Trying PCAS06 (ATGM336H)...\n");
     clearBuffer();
     _serial_gps->write("$PCAS06,1*1A\r\n");
     if (getACK("$GPTXT,01,01,02,HW=ATGM336H", 500) == GNSS_RESPONSE_OK) {
@@ -1238,6 +1279,7 @@ GnssModel_t GPS::probe(int serialSpeed)
 
     /* ATGM332D series (-11(GPS), -21(BDS), -31(GPS+BDS), -51(GPS+GLONASS), -71-0(GPS+BDS+GLONASS))
     based on AT6558 */
+    LOG_DEBUG("Trying PCAS06 (ATGM336H) ...\n");
     clearBuffer();
     _serial_gps->write("$PCAS06,1*1A\r\n");
     if (getACK("$GPTXT,01,01,02,HW=ATGM332D", 500) == GNSS_RESPONSE_OK) {
@@ -1246,17 +1288,55 @@ GnssModel_t GPS::probe(int serialSpeed)
     }
 
     /* Airoha (Mediatek) AG3335A/M/S, A3352Q, Quectel L89 2.0, SimCom SIM65M */
+    LOG_DEBUG("Trying PQTMVERNO (AG335) ...\n");
     clearBuffer();
-    _serial_gps->write("PAIR020*38\r\n");
-    if (getACK("$PAIR020,AG3335", 500) == GNSS_RESPONSE_OK) {
+    _serial_gps->write("$PQTMVERNO*58\r\n");
+    delay(250);
+    if (getACK("$PQTMVERNO,L89HANR01A03S,2020/06/24,17:33:21*39", 500) == GNSS_RESPONSE_OK) {
         LOG_INFO("Aioha AG3335 detected, using AG3335 Module\n");
         return GNSS_MODEL_AG3335;
     }
-    // Get version information for Airoha AG3335
+
+    LOG_DEBUG("Trying PAIR870 (AG335) ...\n");
     clearBuffer();
-    _serial_gps->write("$PMTK605*31\r\n");
+    _serial_gps->write("$PAIR870*35\r\n");
+    delay(250);
+    if (getACK("$PQTMVERNO,870,0*34", 500) == GNSS_RESPONSE_OK) {
+        LOG_INFO("Aioha AG3335 detected, using AG3335 Module\n");
+        return GNSS_MODEL_AG3335;
+    }
+
+    LOG_DEBUG("Trying PAIR024 (AG335) ...\n");
+    clearBuffer();
+    _serial_gps->write("$PAIR024*3C\r\n");
+    LOG_DEBUG("\n");
+    // delay(250);
+    getACK("$PAIR001,024,0*3D", 500);
+    if (getACK("PAIR024,M*5D", 500) == GNSS_RESPONSE_OK) {
+        LOG_INFO("Aioha AG3335 detected, using AG3335 Module\n");
+        return GNSS_MODEL_AG3335;
+    }
+
+    LOG_DEBUG("Trying PAIR020 (AG335) ...\n");
+    clearBuffer();
+    _serial_gps->write("$PAIR020*38\r\n");
+    delay(250);
+    if (getACK("$PAIR001,AG3335", 500) == GNSS_RESPONSE_OK) {
+        LOG_INFO("Aioha AG3335 detected, using AG3335 Module\n");
+        return GNSS_MODEL_AG3335;
+    }
+
+    LOG_DEBUG("Trying PAIR021 (AG335) ...\n");
+    clearBuffer();
+    _serial_gps->write("$PAIR021*39\r\n");
+    delay(250);
+    if (getACK("$PAIR001,AG3335", 500) == GNSS_RESPONSE_OK) {
+        LOG_INFO("Aioha AG3335 detected, using AG3335 Module\n");
+        return GNSS_MODEL_AG3335;
+    }
 
     // Get version information
+    LOG_DEBUG("Trying PCAS06 (L76K) ...\n");
     clearBuffer();
     _serial_gps->write("$PCAS06,0*1B\r\n");
     if (getACK("$GPTXT,01,01,02,SW=", 500) == GNSS_RESPONSE_OK) {
@@ -1265,10 +1345,12 @@ GnssModel_t GPS::probe(int serialSpeed)
     }
 
     // Close all NMEA sentences, valid for L76B MTK platform (Waveshare Pico GPS)
+    LOG_DEBUG("Trying to disable NMEA with PMTK514 ...\n");
     _serial_gps->write("$PMTK514,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0*2E\r\n");
     delay(20);
 
     // Get version information
+    LOG_DEBUG("Trying to PMTK605 (L76B) ...\n");
     clearBuffer();
     _serial_gps->write("$PMTK605*31\r\n");
     if (getACK("Quectel-L76B", 500) == GNSS_RESPONSE_OK) {
@@ -1276,6 +1358,11 @@ GnssModel_t GPS::probe(int serialSpeed)
         return GNSS_MODEL_MTK_L76B;
     }
 
+#ifdef GNSS_AIROHA
+    return GNSS_MODEL_AG3335;
+#endif
+
+    LOG_DEBUG("Trying UBLOX ...\n");
     uint8_t cfg_rate[] = {0xB5, 0x62, 0x06, 0x08, 0x00, 0x00, 0x00, 0x00};
     UBXChecksum(cfg_rate, sizeof(cfg_rate));
     clearBuffer();
@@ -1379,7 +1466,6 @@ GnssModel_t GPS::probe(int serialSpeed)
             }
         }
     }
-
     return GNSS_MODEL_UBLOX;
 }
 
@@ -1831,10 +1917,10 @@ void GPS::toggleGpsMode()
         config.position.gps_mode = meshtastic_Config_PositionConfig_GpsMode_DISABLED;
         LOG_INFO("User toggled GpsMode. Now DISABLED.\n");
 #ifdef GNSS_AIROHA
-        if (powerState == GPS_ACTIVE) {
-            LOG_DEBUG("User power Off GPS\n");
-            digitalWrite(PIN_GPS_EN, LOW);
-        }
+        // if (powerState == GPS_ACTIVE) {
+        //     LOG_DEBUG("User power Off GPS\n");
+        //     digitalWrite(PIN_GPS_EN, LOW);
+        // }
 #endif
         disable();
     } else if (config.position.gps_mode == meshtastic_Config_PositionConfig_GpsMode_DISABLED) {
