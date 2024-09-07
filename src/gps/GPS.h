@@ -17,8 +17,8 @@
 #endif
 
 struct uBloxGnssModelInfo {
-    char swVersion[30];
-    char hwVersion[10];
+    char swVersion[16];
+    char hwVersion[16];
     uint8_t extensionNo;
     char extension[10][30];
 };
