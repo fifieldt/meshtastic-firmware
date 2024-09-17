@@ -82,7 +82,8 @@ class NimbleBluetoothServerCallback : public NimBLEServerCallbacks
         LOG_INFO("*** Enter passkey %d on the peer side ***\n", passkey);
 
         powerFSM.trigger(EVENT_BLUETOOTH_PAIR);
-#if HAS_SCREEN
+// FIXME: T114 has a no-screen option and we have no logic for detecting (lack of) presence of SPI based screens #4565
+#if HAS_SCREEN && !defined(HELTEC_MESH_NODE_T114)
         screen->startAlert([passkey](OLEDDisplay *display, OLEDDisplayUiState *state, int16_t x, int16_t y) -> void {
             char btPIN[16] = "888888";
             snprintf(btPIN, sizeof(btPIN), "%06u", passkey);
