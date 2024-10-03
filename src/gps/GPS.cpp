@@ -1132,23 +1132,35 @@ GnssModel_t GPS::probe(int serialSpeed)
     PROBE_SIMPLE("L76B", "$PMTK605*31", "Quectel-L76B", GNSS_MODEL_MTK_L76B, 500);
 
     uint8_t cfg_rate[] = {0xB5, 0x62, 0x06, 0x08, 0x00, 0x00, 0x00, 0x00};
-    UBXChecksum(cfg_rate, sizeof(cfg_rate));
+    uint8_t msglen = sizeof(cfg_rate);
+    UBXChecksum(cfg_rate, msglen);
     clearBuffer();
-    _serial_gps->write(cfg_rate, sizeof(cfg_rate));
+    _serial_gps->write(cfg_rate, msglen);
     // Check that the returned response class and message ID are correct
     GPS_RESPONSE response = getACK(0x06, 0x08, 750);
     if (response == GNSS_RESPONSE_NONE) {
-        LOG_WARN("Failed to find UBlox & MTK GNSS Module using baudrate %d\n", serialSpeed);
-        return GNSS_MODEL_UNKNOWN;
+        LOG_WARN("Failed to find GNSS Module using baudrate %d\n", serialSpeed);
+        // return GNSS_MODEL_UNKNOWN;
     } else if (response == GNSS_RESPONSE_FRAME_ERRORS) {
         LOG_INFO("UBlox Frame Errors using baudrate %d\n", serialSpeed);
     } else if (response == GNSS_RESPONSE_OK) {
         LOG_INFO("Found a UBlox Module using baudrate %d\n", serialSpeed);
     }
 
+    // This message is deprecated in protocol versions greater than 23.01.
+    uint8_t cfg_msg[] = {0xB5, 0x62, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00};
+    uint8_t msglen = sizeof(cfg_msg);
+    UBXChecksum(cfg_msg, msglen);
+    clearBuffer();
+    _serial_gps->write(cfg_rate, msglen);
+
+    clearBuffer();
+    SEND_UBX_PACKET(0x06, 0x8A, _message_VALSET_DISABLE_NMEA_RAM, "disable NMEA messages in M10 RAM", 300);
+    delay(750);
+
     // tips: NMEA Only should not be set here, otherwise initializing Ublox gnss module again after
     // setting will not output command messages in UART1, resulting in unrecognized module information
-    if (serialSpeed != 9600) {
+    /*if (serialSpeed != 9600) {
         // Set the UART port to 9600
         uint8_t _message_prt[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0xD0, 0x08, 0x00, 0x00,
                                   0x80, 0x25, 0x00, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -1167,7 +1179,7 @@ GnssModel_t GPS::probe(int serialSpeed)
         _serial_gps->updateBaudRate(serialSpeed);
 #endif
         delay(200);
-    }
+    }*/
 
     memset(buffer, 0, sizeof(buffer));
     uint8_t _message_MONVER[8] = {
@@ -1177,13 +1189,13 @@ GnssModel_t GPS::probe(int serialSpeed)
         0x00, 0x00  // Checksum
     };
     //  Get Ublox gnss module hardware and software info
+
     UBXChecksum(_message_MONVER, sizeof(_message_MONVER));
     clearBuffer();
     _serial_gps->write(_message_MONVER, sizeof(_message_MONVER));
-
     uint16_t len = getACK(buffer, sizeof(buffer), 0x0A, 0x04, 1200);
     if (len) {
-        // LOG_DEBUG("monver reply size = %d\n", len);
+        LOG_DEBUG("monver reply size = %d\n", len);
         uint16_t position = 0;
         for (int i = 0; i < 30; i++) {
             info.swVersion[i] = buffer[position];
