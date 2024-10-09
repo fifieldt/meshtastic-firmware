@@ -122,18 +122,32 @@ uint16_t ScanI2CTwoWire::getRegisterValue(const ScanI2CTwoWire::RegisterLocation
 {
     uint16_t value = 0x00;
     TwoWire *i2cBus = fetchI2CBus(registerLocation.i2cAddress);
-
+    LOG_DEBUG("TRYING GETREGVALUE");
+    delay(10);
     i2cBus->beginTransmission(registerLocation.i2cAddress.address);
+    LOG_DEBUG("TRYING WRITE");
+    delay(10);
     i2cBus->write(registerLocation.registerAddress);
+    LOG_DEBUG("TRYING END");
+    delay(10);
     i2cBus->endTransmission();
+    LOG_DEBUG("TRYING REQUESTFROM");
     delay(20);
     i2cBus->requestFrom(registerLocation.i2cAddress.address, responseWidth);
+    delay(10);
     LOG_DEBUG("Wire.available() = %d\n", i2cBus->available());
+    delay(10);
     if (i2cBus->available() == 2) {
         // Read MSB, then LSB
+        LOG_DEBUG("TRYING READ");
+        delay(10);
         value = (uint16_t)i2cBus->read() << 8;
+        LOG_DEBUG("TRYING READ2");
+        delay(10);
         value |= i2cBus->read();
     } else if (i2cBus->available()) {
+        LOG_DEBUG("TRYING READ3");
+        delay(10);
         value = i2cBus->read();
     }
     return value;
@@ -173,7 +187,10 @@ void ScanI2CTwoWire::scanPort(I2CPort port, uint8_t *address, uint8_t asize)
 #endif
 
     for (addr.address = 1; addr.address < 127; addr.address++) {
-        if (asize != 0) {
+#if defined(_VARIANT_TRACKER_T1000_E_)
+        delay(20);
+#endif
+        if (asize != 0 && address != nullptr) {
             if (!in_array(address, asize, addr.address))
                 continue;
             LOG_DEBUG("Scanning address 0x%x\n", addr.address);
@@ -393,7 +410,6 @@ void ScanI2CTwoWire::scanPort(I2CPort port, uint8_t *address, uint8_t asize)
 
                 SCAN_SIMPLE_CASE(QMC5883L_ADDR, QMC5883L, "QMC5883L Highrate 3-Axis magnetic sensor found\n")
                 SCAN_SIMPLE_CASE(HMC5883L_ADDR, HMC5883L, "HMC5883L 3-Axis digital compass found\n")
-                SCAN_SIMPLE_CASE(PMSA0031_ADDR, PMSA0031, "PMSA0031 air quality sensor found\n")
                 SCAN_SIMPLE_CASE(BMA423_ADDR, BMA423, "BMA423 accelerometer found\n");
                 SCAN_SIMPLE_CASE(LSM6DS3_ADDR, LSM6DS3, "LSM6DS3 accelerometer found at address 0x%x\n", (uint8_t)addr.address);
                 SCAN_SIMPLE_CASE(TCA9535_ADDR, TCA9535, "TCA9535 I2C expander found\n");
@@ -406,6 +422,21 @@ void ScanI2CTwoWire::scanPort(I2CPort port, uint8_t *address, uint8_t asize)
                 SCAN_SIMPLE_CASE(FT6336U_ADDR, FT6336U, "FT6336U touchscreen found\n");
                 SCAN_SIMPLE_CASE(MAX1704X_ADDR, MAX17048, "MAX17048 lipo fuel gauge found\n");
                 SCAN_SIMPLE_CASE(MLX90614_ADDR_DEF, MLX90614, "MLX90614 IR temp sensor found\n");
+
+            case PMSA0031_ADDR:
+                LOG_DEBUG("TRYING 0x12");
+                registerValue = getRegisterValue(ScanI2CTwoWire::RegisterLocation(addr, 0x00), 1); // get CHIP_ID
+                LOG_DEBUG("GOT REGISTER VALUE 0x%x", registerValue);
+                if ((registerValue & 0xF0) == 0x90) {
+                    type = QMA6100P;
+                    LOG_INFO("QMA6100 accelerometer found\n");
+                    break;
+                } else {
+                    type = PMSA0031;
+                    LOG_INFO("PMSA0031 air quality sensor found\n");
+                    break;
+                }
+                break;
 
             case ICM20948_ADDR:     // same as BMX160_ADDR
             case ICM20948_ADDR_ALT: // same as MPU6050_ADDR

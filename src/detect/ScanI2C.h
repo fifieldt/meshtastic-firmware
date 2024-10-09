@@ -60,7 +60,8 @@ class ScanI2C
         FT6336U,
         STK8BAXX,
         ICM20948,
-        MAX30102
+        MAX30102,
+        QMA6100P
     } DeviceType;
 
     // typedef uint8_t DeviceAddress;
