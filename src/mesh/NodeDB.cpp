@@ -196,6 +196,18 @@ NodeNum getFrom(const meshtastic_MeshPacket *p)
     return (p->from == 0) ? nodeDB->getNodeNum() : p->from;
 }
 
+// Returns true if the packet originated from the local node
+bool isFromUs(const meshtastic_MeshPacket *p)
+{
+    return p->from == 0 || p->from == nodeDB->getNodeNum();
+}
+
+// Returns true if the packet is destined to us
+bool isToUs(const meshtastic_MeshPacket *p)
+{
+    return p->to == nodeDB->getNodeNum();
+}
+
 bool NodeDB::resetRadioConfig(bool factory_reset)
 {
     bool didFactoryReset = false;
@@ -286,27 +298,26 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
         true; // FIXME: maybe false in the future, and setting region to enable it. (unset region forces it off)
     config.lora.override_duty_cycle = false;
     config.lora.config_ok_to_mqtt = false;
-#ifdef CONFIG_LORA_REGION_USERPREFS
-    config.lora.region = CONFIG_LORA_REGION_USERPREFS;
+#ifdef USERPREFS_CONFIG_LORA_REGION
+    config.lora.region = USERPREFS_CONFIG_LORA_REGION;
 #else
     config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_UNSET;
 #endif
-#ifdef LORACONFIG_MODEM_PRESET_USERPREFS
-    config.lora.modem_preset = LORACONFIG_MODEM_PRESET_USERPREFS;
+#ifdef USERPREFS_LORACONFIG_MODEM_PRESET
+    config.lora.modem_preset = USERPREFS_LORACONFIG_MODEM_PRESET;
 #else
     config.lora.modem_preset = meshtastic_Config_LoRaConfig_ModemPreset_LONG_FAST;
 #endif
     config.lora.hop_limit = HOP_RELIABLE;
-#ifdef CONFIG_LORA_IGNORE_MQTT_USERPREFS
-    config.lora.ignore_mqtt = CONFIG_LORA_IGNORE_MQTT_USERPREFS;
+#ifdef USERPREFS_CONFIG_LORA_IGNORE_MQTT
+    config.lora.ignore_mqtt = USERPREFS_CONFIG_LORA_IGNORE_MQTT;
 #else
     config.lora.ignore_mqtt = false;
 #endif
-#ifdef ADMIN_KEY_USERPREFS
-    memcpy(config.security.admin_key[0].bytes, admin_key_userprefs, 32);
+#ifdef USERPREFS_USE_ADMIN_KEY
+    memcpy(config.security.admin_key[0].bytes, USERPREFS_ADMIN_KEY, 32);
     config.security.admin_key[0].size = 32;
-#else
-    config.security.admin_key[0].size = 0;
+    config.security.admin_key_count = 1;
 #endif
     if (shouldPreserveKey) {
         config.security.private_key.size = 32;
@@ -324,7 +335,9 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #else
     config.device.disable_triple_click = true;
 #endif
-#if !HAS_GPS || defined(T_DECK) || defined(TLORA_T3S3_EPAPER)
+#if defined(USERPREFS_CONFIG_GPS_MODE)
+    config.position.gps_mode = USERPREFS_CONFIG_GPS_MODE;
+#elif !HAS_GPS || defined(T_DECK) || defined(TLORA_T3S3_EPAPER)
     config.position.gps_mode = meshtastic_Config_PositionConfig_GpsMode_NOT_PRESENT;
 #elif !defined(GPS_RX_PIN)
     if (config.position.rx_gpio == 0)
@@ -346,8 +359,8 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
     // FIXME: Default to bluetooth capability of platform as default
     config.bluetooth.enabled = true;
     config.bluetooth.fixed_pin = defaultBLEPin;
-#if defined(ST7735_CS) || defined(USE_EINK) || defined(ILI9341_DRIVER) || defined(ST7789_CS) || defined(HX8357_CS) ||            \
-    defined(USE_ST7789)
+#if defined(ST7735_CS) || defined(USE_EINK) || defined(ILI9341_DRIVER) || defined(ILI9342_DRIVER) || defined(ST7789_CS) ||       \
+    defined(HX8357_CS) || defined(USE_ST7789)
     bool hasScreen = true;
 #elif ARCH_PORTDUINO
     bool hasScreen = false;
@@ -520,6 +533,7 @@ void NodeDB::installRoleDefaults(meshtastic_Config_DeviceConfig_Role role)
         moduleConfig.telemetry.device_update_interval = UINT32_MAX;
         moduleConfig.telemetry.environment_update_interval = UINT32_MAX;
         moduleConfig.telemetry.air_quality_interval = UINT32_MAX;
+        moduleConfig.telemetry.health_update_interval = UINT32_MAX;
     }
 }
 
@@ -530,6 +544,7 @@ void NodeDB::initModuleConfigIntervals()
     moduleConfig.telemetry.environment_update_interval = 0;
     moduleConfig.telemetry.air_quality_interval = 0;
     moduleConfig.telemetry.power_update_interval = 0;
+    moduleConfig.telemetry.health_update_interval = 0;
     moduleConfig.neighbor_info.update_interval = 0;
     moduleConfig.paxcounter.paxcounter_update_interval = 0;
 }
@@ -612,18 +627,20 @@ void NodeDB::installDefaultDeviceState()
     // devicestate.node_db_lite_count = 0;
     devicestate.version = DEVICESTATE_CUR_VER;
     devicestate.receive_queue_count = 0; // Not yet implemented FIXME
+    devicestate.has_rx_waypoint = false;
+    devicestate.has_rx_text_message = false;
 
     generatePacketId(); // FIXME - ugly way to init current_packet_id;
 
     // Set default owner name
     pickNewNodeNum(); // based on macaddr now
-#ifdef CONFIG_OWNER_LONG_NAME_USERPREFS
-    snprintf(owner.long_name, sizeof(owner.long_name), CONFIG_OWNER_LONG_NAME_USERPREFS);
+#ifdef USERPREFS_CONFIG_OWNER_LONG_NAME
+    snprintf(owner.long_name, sizeof(owner.long_name), USERPREFS_CONFIG_OWNER_LONG_NAME);
 #else
     snprintf(owner.long_name, sizeof(owner.long_name), "Meshtastic %02x%02x", ourMacAddr[4], ourMacAddr[5]);
 #endif
-#ifdef CONFIG_OWNER_SHORT_NAME_USERPREFS
-    snprintf(owner.short_name, sizeof(owner.short_name), CONFIG_OWNER_SHORT_NAME_USERPREFS);
+#ifdef USERPREFS_CONFIG_OWNER_SHORT_NAME
+    snprintf(owner.short_name, sizeof(owner.short_name), USERPREFS_CONFIG_OWNER_SHORT_NAME);
 #else
     snprintf(owner.short_name, sizeof(owner.short_name), "%02x%02x", ourMacAddr[4], ourMacAddr[5]);
 #endif
