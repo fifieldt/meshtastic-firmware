@@ -1106,6 +1106,11 @@ GnssModel_t GPS::probe(int serialSpeed)
     // Close all NMEA sentences, valid for L76K, ATGM336H (and likely other AT6558 devices)
     _serial_gps->write("$PCAS03,0,0,0,0,0,0,0,0,0,0,,,0,0*02\r\n");
     delay(20);
+    // Close NMEA sequences on Ublox
+    _serial_gps->write("$PUBX,40,GLL,0,0,0,0,0,0*5C\r\n");
+    _serial_gps->write("$PUBX,40,GSV,0,0,0,0,0,0*59\r\n");
+    _serial_gps->write("$PUBX,40,VTG,0,0,0,0,0,0*5E\r\n");
+    delay(20);
 
     // Unicore UFirebirdII Series: UC6580, UM620, UM621, UM670A, UM680A, or UM681A
     PROBE_SIMPLE("UC6580", "$PDTINFO", "UC6580", GNSS_MODEL_UC6580, 500);
@@ -1140,46 +1145,10 @@ GnssModel_t GPS::probe(int serialSpeed)
     GPS_RESPONSE response = getACK(0x06, 0x08, 750);
     if (response == GNSS_RESPONSE_NONE) {
         LOG_WARN("Failed to find GNSS Module using baudrate %d\n", serialSpeed);
-        // return GNSS_MODEL_UNKNOWN;
+        return GNSS_MODEL_UNKNOWN;
     } else if (response == GNSS_RESPONSE_FRAME_ERRORS) {
         LOG_INFO("UBlox Frame Errors using baudrate %d\n", serialSpeed);
-    } else if (response == GNSS_RESPONSE_OK) {
-        LOG_INFO("Found a UBlox Module using baudrate %d\n", serialSpeed);
     }
-
-    // This message is deprecated in protocol versions greater than 23.01.
-    uint8_t cfg_msg[] = {0xB5, 0x62, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00};
-    uint8_t msglen = sizeof(cfg_msg);
-    UBXChecksum(cfg_msg, msglen);
-    clearBuffer();
-    _serial_gps->write(cfg_rate, msglen);
-
-    clearBuffer();
-    SEND_UBX_PACKET(0x06, 0x8A, _message_VALSET_DISABLE_NMEA_RAM, "disable NMEA messages in M10 RAM", 300);
-    delay(750);
-
-    // tips: NMEA Only should not be set here, otherwise initializing Ublox gnss module again after
-    // setting will not output command messages in UART1, resulting in unrecognized module information
-    /*if (serialSpeed != 9600) {
-        // Set the UART port to 9600
-        uint8_t _message_prt[] = {0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0xD0, 0x08, 0x00, 0x00,
-                                  0x80, 0x25, 0x00, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        UBXChecksum(_message_prt, sizeof(_message_prt));
-        _serial_gps->write(_message_prt, sizeof(_message_prt));
-        delay(500);
-        serialSpeed = 9600;
-#if defined(ARCH_NRF52) || defined(ARCH_PORTDUINO) || defined(ARCH_STM32WL)
-        _serial_gps->end();
-        _serial_gps->begin(serialSpeed);
-#elif defined(ARCH_RP2040)
-        _serial_gps->end();
-        _serial_gps->setFIFOSize(256);
-        _serial_gps->begin(serialSpeed);
-#else
-        _serial_gps->updateBaudRate(serialSpeed);
-#endif
-        delay(200);
-    }*/
 
     memset(buffer, 0, sizeof(buffer));
     uint8_t _message_MONVER[8] = {
@@ -1195,7 +1164,6 @@ GnssModel_t GPS::probe(int serialSpeed)
     _serial_gps->write(_message_MONVER, sizeof(_message_MONVER));
     uint16_t len = getACK(buffer, sizeof(buffer), 0x0A, 0x04, 1200);
     if (len) {
-        LOG_DEBUG("monver reply size = %d\n", len);
         uint16_t position = 0;
         for (int i = 0; i < 30; i++) {
             info.swVersion[i] = buffer[position];
@@ -1230,12 +1198,6 @@ GnssModel_t GPS::probe(int serialSpeed)
         for (int i = 0; i < info.extensionNo; ++i) {
             if (!strncmp(info.extension[i], "MOD=", 4)) {
                 strncpy((char *)buffer, &(info.extension[i][4]), sizeof(buffer));
-                // LOG_DEBUG("GetModel:%s\n", (char *)buffer);
-                if (strlen((char *)buffer)) {
-                    LOG_INFO("%s detected, using GNSS_MODEL_UBLOX\n", (char *)buffer);
-                } else {
-                    LOG_INFO("Generic Ublox detected, using GNSS_MODEL_UBLOX\n");
-                }
             } else if (!strncmp(info.extension[i], "PROTVER", 7)) {
                 char *ptr = nullptr;
                 memset(buffer, 0, sizeof(buffer));
@@ -1250,18 +1212,23 @@ GnssModel_t GPS::probe(int serialSpeed)
             }
         }
         if (strncmp(info.hwVersion, "00040007", 8) == 0) {
+            LOG_INFO(DETECTED_MESSAGE, "U-blox 6", "");
             return GNSS_MODEL_UBLOX6;
         } else if (strncmp(info.hwVersion, "00070000", 8) == 0) {
+            LOG_INFO(DETECTED_MESSAGE, "U-blox 7", "");
             return GNSS_MODEL_UBLOX7;
         } else if (strncmp(info.hwVersion, "00080000", 8) == 0) {
+            LOG_INFO(DETECTED_MESSAGE, "U-blox 8", "");
             return GNSS_MODEL_UBLOX8;
         } else if (strncmp(info.hwVersion, "00190000", 8) == 0) {
+            LOG_INFO(DETECTED_MESSAGE, "U-blox 9", "");
             return GNSS_MODEL_UBLOX9;
         } else if (strncmp(info.hwVersion, "000A0000", 8) == 0) {
+            LOG_INFO(DETECTED_MESSAGE, "U-blox 10", "");
             return GNSS_MODEL_UBLOX10;
         }
     }
-
+    LOG_WARN("Failed to find GNSS Module using baudrate %d\n", serialSpeed);
     return GNSS_MODEL_UNKNOWN;
 }
 
